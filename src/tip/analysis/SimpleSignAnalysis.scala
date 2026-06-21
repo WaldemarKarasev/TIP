@@ -3,11 +3,12 @@ package tip.analysis
 import tip.cfg.CfgOps._
 import tip.cfg.{CfgNode, CfgStmtNode, ProgramCfg}
 import tip.lattices.{MapLattice, SignLattice}
-import tip.ast.AstNodeData.DeclarationData
+import tip.ast.AstNodeData.{DeclarationData, AstNodeWithDeclaration}
 import tip.ast._
 import tip.solvers.FixpointSolvers
 
 import scala.collection.immutable.Set
+
 
 /**
   * Simple intra-procedural sign analysis.
@@ -85,10 +86,14 @@ class SimpleSignAnalysis(cfg: ProgramCfg)(implicit declData: DeclarationData) ex
       case r: CfgStmtNode =>
         r.data match {
           // var declarations
-          case varr: AVarStmt => ??? //<--- Complete here
+          case varr: AVarStmt => 
+            varr.declIds.foldLeft(s) { (acc, id) =>
+            acc + (id -> valuelattice.top)
+          }
 
           // assignments
-          case AAssignStmt(id: AIdentifier, right, _) => ??? //<--- Complete here
+          case AAssignStmt(id: AIdentifier, right, _) => 
+            s + (id.declaration -> eval(right, s))
 
           // all others: like no-ops
           case _ => s

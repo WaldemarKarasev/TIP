@@ -30,6 +30,8 @@ class TypeAnalysis(program: AProgram)(implicit declData: DeclarationData) extend
 
   implicit val allFieldNames: List[String] = program.appearingFields.toList.sorted
 
+  log.info(allFieldNames.toString() + "size:" + allFieldNames.size)
+  log.info("program.funcs.size:" + program.funs.size)
   /**
     * @inheritdoc
     */
@@ -90,6 +92,7 @@ class TypeAnalysis(program: AProgram)(implicit declData: DeclarationData) extend
     }
 
     log.info(s"Inferred types:\n${ret.map { case (k, v) => s"  \u27E6$k\u27E7 = ${v.get}" }.mkString("\n")}")
+    // log.info(s"Classes:\n${solver.unifications()}")
     ret
   }
 
@@ -101,34 +104,67 @@ class TypeAnalysis(program: AProgram)(implicit declData: DeclarationData) extend
   def visit(node: AstNode, arg: Unit): Unit = {
     log.verb(s"Visiting ${node.getClass.getSimpleName} at ${node.loc}")
     node match {
-      case program: AProgram => ??? // <--- Complete here
-      case _: ANumber => ??? // <--- Complete here
-      case _: AInput => ??? // <--- Complete here
-      case is: AIfStmt => ??? // <--- Complete here
-      case os: AOutputStmt => ??? // <--- Complete here
-      case ws: AWhileStmt => ??? // <--- Complete here
+      case program: AProgram =>        
+      case _: ANumber => unify(VarType(node), IntType())
+      case _: AInput => unify(VarType(node), IntType())
+      case is: AIfStmt => unify(VarType(is.guard), IntType())
+      case os: AOutputStmt => unify(VarType(os.exp), IntType())
+      case ws: AWhileStmt => unify(VarType(ws.guard), IntType())
       case as: AAssignStmt =>
         as.left match {
-          case id: AIdentifier => ??? // <--- Complete here
-          case dw: ADerefWrite => ??? // <--- Complete here
-          case dfw: ADirectFieldWrite => ??? // <--- Complete here
-          case ifw: AIndirectFieldWrite => ??? // <--- Complete here
+          case id: AIdentifier => 
+            log.warn(s"id:$id")
+            unify(id, as.right)
+          case dw: ADerefWrite => unify(dw.exp, PointerType(as.right))
+          case dfw: ADirectFieldWrite => 
+            log.warn(s"Unify ADirectFieldWrite:$dfw\n " +
+              s"l:${as.left}, r:${as.right}\n" +
+              s"id:${dfw.id}, field:${dfw.field}\n" +
+              s"as:$as")
+              unify(dfw.id, RecordType(allFieldNames.map { f =>
+                if (f == dfw.field) Type.ast2typevar(as.right) else FreshVarType()
+              }))
+
+          case ifw: AIndirectFieldWrite => 
+            log.warn(s"Unify AIndirectFieldWrite:$ifw\n " +
+              s"l:${as.left}, r:${as.right}\n" +
+              s"expr:${ifw.exp}, field:${ifw.field}\n" +
+              s"as:$as")
+              var r_t = RecordType(allFieldNames.map { f =>
+                if (f == ifw.field) Type.ast2typevar(as.right) else FreshVarType()
+              })
+              unify(ifw.exp, PointerType(r_t))
+
         }
       case bin: ABinaryOp =>
         bin.operator match {
-          case Eqq => ??? // <--- Complete here
-          case _ => ??? // <--- Complete here
+          case Eqq => 
+            unify(bin.left, bin.right)
+            unify(VarType(node), IntType())
+          case _ =>
+            unify(bin.left, bin.right)
+            unify(bin.left, node)
+            unify(VarType(node), IntType())
         }
       case un: AUnaryOp =>
         un.operator match {
-          case DerefOp => ??? // <--- Complete here
+          case DerefOp => unify(un.subexp, PointerType(VarType(un)))
         }
-      case alloc: AAlloc => ??? // <--- Complete here
-      case ref: AVarRef => ??? // <--- Complete here
-      case _: ANull => ??? // <--- Complete here
-      case fun: AFunDeclaration => ??? // <--- Complete here
-      case call: ACallFuncExpr => ??? // <--- Complete here
-      case _: AReturnStmt =>
+      case alloc: AAlloc => unify(VarType(alloc), PointerType(alloc.exp))
+      case ref: AVarRef => unify(VarType(ref), PointerType(VarType(ref.id)))
+      case _: ANull => unify(VarType(node), PointerType(FreshVarType()))
+      case fun: AFunDeclaration =>
+          if (fun.name == "main") {
+            unify(fun.stmts.ret.exp, IntType())
+            fun.params.map(p => unify(VarType(p), IntType()))
+          }
+          unify(VarType(fun), FunctionType(fun.params.map(p => VarType(p)), fun.stmts.ret.exp))
+
+      case call: ACallFuncExpr => 
+        unify(call.targetFun, FunctionType(call.args.map(arg => arg), VarType(call)))
+
+      case _: AReturnStmt => 
+      
       case rec: ARecord =>
         val fieldmap = rec.fields.foldLeft(Map[String, Term[Type]]()) { (a, b) =>
           a + (b.field -> b.exp)
@@ -146,7 +182,10 @@ class TypeAnalysis(program: AProgram)(implicit declData: DeclarationData) extend
   }
 
   private def unify(t1: Term[Type], t2: Term[Type]): Unit = {
-    log.verb(s"Generating constraint $t1 = $t2")
+    log.info(s"Generating constraint $t1 = $t2")
     solver.unify(t1, t2)
+    // log.info(s"unifications after unify()\n${solver.unifications()
+    //                                         .map { case (rep, terms) => s"$rep: ${terms.mkString(", ")}" }
+    //                                         .mkString("\n")}")
   }
 }
